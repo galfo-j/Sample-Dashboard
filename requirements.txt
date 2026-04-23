@@ -4,4 +4,4 @@ numpy
 plotly
 pillow 
 openpyxl
-statsmodel
+statsmodels
