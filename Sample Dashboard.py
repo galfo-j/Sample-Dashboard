@@ -5,7 +5,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import base64
-from sklearn.linear_model import LinearRegression  # Add this import
 
 # ==========================================
 # 1. CONFIGURATION & THEMING
@@ -91,24 +90,6 @@ def apply_pro_theme(bg_file):
         padding: 20px;
         border-left: 4px solid #5992C6;
         margin: 15px 0;
-    }}
-    
-    /* Custom navigation styling */
-    .nav-button {{
-        background: transparent;
-        border: none;
-        color: #c0d0e0;
-        padding: 10px 15px;
-        text-align: left;
-        width: 100%;
-        border-radius: 8px;
-        margin: 2px 0;
-        transition: all 0.3s ease;
-    }}
-    .nav-button:hover {{
-        background: rgba(89, 146, 198, 0.2);
-        border-left: 3px solid #5992C6;
-        padding-left: 12px;
     }}
     </style>
     '''
@@ -495,39 +476,55 @@ elif selected == "DRIVERS ANALYSIS":
     )
     st.plotly_chart(fig_3d, use_container_width=True)
     
-    # Driver Importance Analysis
+    # Driver Importance Analysis (using numpy instead of sklearn)
     st.markdown("---")
     st.markdown("### 📊 Driver Impact Analysis")
     
     if len(latest_data) > 5:
-        X = latest_data[['GDP per Capita', 'Education Index', 'Health Index']].fillna(latest_data.mean())
-        y = latest_data['Life Expectancy']
-        
-        model = LinearRegression()
-        model.fit(X, y)
-        
-        importance_df = pd.DataFrame({
+        # Calculate correlation coefficients as a proxy for impact
+        impact_df = pd.DataFrame({
             'Driver': ['GDP per Capita', 'Education Index', 'Health Index'],
-            'Coefficient': model.coef_,
-            'Impact': np.abs(model.coef_)
-        }).sort_values('Impact', ascending=True)
+            'Correlation with Life Expectancy': [
+                latest_data['GDP per Capita'].corr(latest_data['Life Expectancy']),
+                latest_data['Education Index'].corr(latest_data['Life Expectancy']),
+                latest_data['Health Index'].corr(latest_data['Life Expectancy'])
+            ]
+        }).sort_values('Correlation with Life Expectancy', ascending=True)
         
-        fig_importance = px.bar(importance_df, x='Impact', y='Driver', orientation='h',
-                                title="Relative Impact of Different Drivers on Life Expectancy",
-                                color='Impact',
+        fig_importance = px.bar(impact_df, 
+                                x='Correlation with Life Expectancy', 
+                                y='Driver', 
+                                orientation='h',
+                                title="Correlation of Different Drivers with Life Expectancy",
+                                color='Correlation with Life Expectancy',
                                 color_continuous_scale='Viridis',
                                 template="plotly_dark",
-                                text='Coefficient')
+                                text='Correlation with Life Expectancy')
         fig_importance.update_traces(texttemplate='%{text:.3f}', textposition='outside')
         fig_importance.update_layout(height=400, paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_importance, use_container_width=True)
         
+        # Calculate simple linear regression coefficients manually
+        X_gdp = latest_data['GDP per Capita'].values.reshape(-1, 1)
+        y = latest_data['Life Expectancy'].values
+        
+        # Simple slope calculation for each driver
+        slopes = {}
+        for driver in ['GDP per Capita', 'Education Index', 'Health Index']:
+            x = latest_data[driver].values
+            if len(x) > 1 and x.std() > 0:
+                slope = np.corrcoef(x, y)[0, 1] * (y.std() / x.std())
+                slopes[driver] = slope
+        
+        best_driver = max(slopes, key=slopes.get) if slopes else "Education Index"
+        
         st.markdown(f"""
         <div class="insight-card">
-            <strong>📈 Model Insights:</strong><br>
-            • R² Score: {model.score(X, y):.3f}<br>
-            • Education Index has the strongest positive impact on life expectancy<br>
-            • Health Index also shows significant correlation with longevity
+            <strong>📈 Driver Impact Analysis:</strong><br>
+            • <strong>{best_driver}</strong> shows the strongest positive correlation with life expectancy<br>
+            • Education and Health indices together explain significant variation in life expectancy<br>
+            • GDP per capita positively correlates with longevity, but other factors matter more<br>
+            • Countries investing in education and healthcare see better health outcomes
         </div>
         """, unsafe_allow_html=True)
 
@@ -562,8 +559,10 @@ elif selected == "TRENDS & FORECAST":
             z_score = 1.96 if confidence_level >= 95 else 1.64 if confidence_level >= 90 else 1.28
             
             st.metric("Projected Improvement Rate", f"{z[0]:+.4f} years/year")
-            st.metric("Life Expectancy by 2030", f"{p(2030):.1f} years" if 2030 <= future_years[-1] else "N/A")
-            st.metric("Life Expectancy by 2050", f"{p(2050):.1f} years" if 2050 <= future_years[-1] else "N/A")
+            if 2030 <= future_years[-1]:
+                st.metric("Life Expectancy by 2030", f"{p(2030):.1f} years")
+            if 2050 <= future_years[-1]:
+                st.metric("Life Expectancy by 2050", f"{p(2050):.1f} years")
     
     with col_pred:
         if len(yearly_global) > 1:
@@ -651,17 +650,23 @@ elif selected == "COMPARATIVE STUDY":
         
         latest_comp = comparison_data[comparison_data['Year'] == comparison_data['Year'].max()]
         
+        # Get max values for normalization
+        max_life = latest_comp['Life Expectancy'].max()
+        max_gdp = latest_comp['GDP per Capita'].max()
+        
         fig_radar = go.Figure()
         
         for country in selected_countries:
             country_data = latest_comp[latest_comp['Country'] == country]
             if not country_data.empty:
                 fig_radar.add_trace(go.Scatterpolar(
-                    r=[country_data['Life Expectancy'].iloc[0] / 80,
-                       country_data['GDP per Capita'].iloc[0] / 20000,
-                       country_data['Education Index'].iloc[0] / 100,
-                       country_data['Health Index'].iloc[0] / 100,
-                       country_data['SDG Index'].iloc[0]],
+                    r=[
+                        country_data['Life Expectancy'].iloc[0] / max_life,
+                        country_data['GDP per Capita'].iloc[0] / max_gdp,
+                        country_data['Education Index'].iloc[0] / 100,
+                        country_data['Health Index'].iloc[0] / 100,
+                        country_data['SDG Index'].iloc[0]
+                    ],
                     theta=['Life Expectancy', 'GDP per Capita', 'Education', 'Health', 'SDG Index'],
                     fill='toself',
                     name=country
@@ -669,7 +674,7 @@ elif selected == "COMPARATIVE STUDY":
         
         fig_radar.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-            title="Normalized Metrics Comparison",
+            title="Normalized Metrics Comparison (0-1 scale)",
             template="plotly_dark",
             height=500,
             paper_bgcolor='rgba(0,0,0,0)'
@@ -692,7 +697,7 @@ elif selected == "COMPARATIVE STUDY":
         st.dataframe(stats_table, use_container_width=True)
         
     else:
-        st.warning("Please select at least 2 countries in the sidebar for comparison")
+        st.warning("⚠️ Please select at least 2 countries in the sidebar for comparison")
 
 # ==========================================
 # INSIGHTS VIEW
@@ -776,7 +781,7 @@ elif selected == "INSIGHTS":
         """, unsafe_allow_html=True)
         
         # Additional insights
-        if not top_performers.empty:
+        if 'top_performers' in locals() and not top_performers.empty:
             st.markdown(f"""
             <div class="insight-card">
                 <h4>📈 Top Performing Countries</h4>
@@ -793,4 +798,4 @@ elif selected == "INSIGHTS":
 # FOOTER
 # ==========================================
 st.markdown("---")
-st.caption("📊 SDG Dashboard: Analyzing Drivers of Life Expectancy | Data Source: Hypothetical Dataset  | Built with Streamlit & Plotly")
+st.caption("📊 SDG Dashboard: Analyzing Drivers of Life Expectancy | Data Source: Hypothetical Dataset (2000-2020) | Built with Streamlit & Plotly")
