@@ -613,20 +613,6 @@ elif selected == "TRENDS & FORECAST":
             
             st.plotly_chart(fig_forecast, use_container_width=True)
     
-    if len(yearly_global) > 1:
-        st.markdown("---")
-        st.markdown("### 📅 Forecast Summary")
-        
-        forecast_table = pd.DataFrame({
-            'Year': future_years.astype(int),
-            'Projected Life Expectancy (years)': future_life.round(2),
-            'Year-over-Year Change (years)': np.append([0], np.diff(future_life).round(4))
-        })
-        
-        display_table = forecast_table.iloc[::max(1, len(forecast_table)//10)].copy()
-        
-        st.dataframe(display_table, use_container_width=True)
-
 # ==========================================
 # COMPARATIVE STUDY VIEW
 # ==========================================
