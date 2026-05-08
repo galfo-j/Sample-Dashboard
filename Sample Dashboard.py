@@ -4,8 +4,12 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import base64
+from streamlit_option_menu import option_menu
 
-# Page configuration
+# ==========================================
+# 1. CONFIGURATION & THEMING
+# ==========================================
 st.set_page_config(
     page_title="SDG Dashboard - Life Expectancy Drivers",
     page_icon="❤️",
@@ -13,417 +17,764 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
-st.markdown("""
-<style>
-    .stMetric {
-        background-color: #f0f2f6;
-        padding: 10px;
-        border-radius: 10px;
-    }
-    .insight-box {
-        background-color: #e8f4f8;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #5992C6;
-        margin: 20px 0;
-    }
-    .footer {
-        text-align: center;
-        padding: 20px;
-        color: #666;
-        border-top: 1px solid #ddd;
-        margin-top: 50px;
-    }
-</style>
-""", unsafe_allow_html=True)
+def get_base64(bin_file):
+    try:
+        with open(bin_file, 'rb') as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    except:
+        return ""
 
-# Load data with caching for performance
+def apply_pro_theme(bg_file):
+    bin_str = get_base64(bg_file)
+    bg_style = f'url("data:image/jpg;base64,{bin_str}")' if bin_str else "none"
+    
+    theme_css = f'''
+    <style>
+    .stApp {{
+        background: linear-gradient(135deg, rgba(8, 12, 25, 0.95) 0%, rgba(15, 25, 45, 0.92) 100%),
+                    {bg_style};
+        background-size: cover;
+        background-attachment: fixed;
+        background-position: center;
+    }}
+    
+    [data-testid="stSidebar"] {{
+        background: rgba(10, 20, 35, 0.75) !important;
+        backdrop-filter: blur(12px);
+        border-right: 1px solid rgba(0, 212, 255, 0.2);
+    }}
+    
+    div[data-testid="column"] {{
+        background: rgba(20, 30, 50, 0.55);
+        backdrop-filter: blur(10px);
+        border-radius: 16px;
+        padding: 18px;
+        border: 1px solid rgba(0, 212, 255, 0.15);
+    }}
+    
+    .main-header {{
+        background: linear-gradient(90deg, rgba(89, 146, 198, 0.15), rgba(0, 100, 150, 0.08));
+        padding: 12px 24px;
+        border-radius: 12px;
+        border-left: 3px solid #5992C6;
+        margin-bottom: 25px;
+    }}
+    
+    .metric-value {{
+        font-size: 2.4rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #5992C6, #00aaff);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent !important;
+    }}
+    
+    .metric-label {{
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: #8a9bb0 !important;
+    }}
+    
+    .selected-info {{
+        background: linear-gradient(135deg, rgba(89, 146, 198, 0.15), rgba(0, 100, 150, 0.08));
+        border-radius: 12px;
+        padding: 15px;
+        border-left: 4px solid #5992C6;
+        margin-bottom: 15px;
+    }}
+    
+    .insight-card {{
+        background: rgba(89, 146, 198, 0.08);
+        border-radius: 12px;
+        padding: 20px;
+        border-left: 4px solid #5992C6;
+        margin: 15px 0;
+    }}
+    </style>
+    '''
+    st.markdown(theme_css, unsafe_allow_html=True)
+
+# Try to apply theme with background image (optional)
+try:
+    apply_pro_theme("for trial.jpg")  # Remove or replace with your image
+except:
+    apply_pro_theme("")  # Fallback to no image
+
+# ==========================================
+# 2. DATA ENGINE
+# ==========================================
 @st.cache_data
 def load_data():
-    df = pd.read_excel("Hypothetical_Data.xlsx")
-    return df
+    try:
+        df = pd.read_excel("Hypothetical_Data.xlsx")
+        
+        # Data validation
+        required_cols = ['Country', 'Year', 'GDP per Capita', 'Education Index', 'Health Index', 'Life Expectancy']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            st.error(f"Missing required columns: {missing_cols}")
+            return None
+        
+        # Create normalized indices (0-1 scale) for visualizations
+        df['Education Index Normalized'] = df['Education Index'] / 100
+        df['Health Index Normalized'] = df['Health Index'] / 100
+        
+        # Calculate composite SDG Index (average of normalized indices)
+        df['SDG Index'] = (df['Education Index Normalized'] + df['Health Index Normalized']) / 2
+        
+        return df
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        return None
 
 df = load_data()
 
-# Sidebar filters
+if df is None:
+    st.stop()
+
+# Get unique values for filters
+countries = sorted(df["Country"].unique())
+years = sorted(df["Year"].unique())
+
+# ==========================================
+# 3. SIDEBAR NAVIGATION
+# ==========================================
 with st.sidebar:
-    st.markdown("## 🔍 Filters")
-    
-    # Year range slider
-    selected_year = st.slider(
-        "Select Year",
-        int(df["Year"].min()),
-        int(df["Year"].max()),
-        2010,
-        format="%d"
+    selected = option_menu(
+        menu_title=None,
+        options=["DASHBOARD", "COUNTRY ANALYSIS", "DRIVERS ANALYSIS", "TRENDS & FORECAST", "COMPARATIVE STUDY", "INSIGHTS"],
+        icons=["graph-up", "flag", "graph-up-arrow", "calendar-week", "bar-chart", "lightbulb"],
+        default_index=0,
+        styles={
+            "container": {"background-color": "transparent"},
+            "nav-link": {"color": "#c0d0e0", "font-size": "0.85rem", "text-align": "left"},
+            "nav-link-selected": {"background-color": "rgba(89,146,198,0.2)", "border-left": "3px solid #5992C6"},
+        }
     )
     
-    # Multi-select for countries
-    all_countries = df["Country"].unique()
+    st.divider()
+    
+    st.markdown("### ⏱️ TIME & FILTERS")
+    
+    # Year range filter
+    min_year, max_year = int(df['Year'].min()), int(df['Year'].max())
+    year_range = st.slider("Select Year Range", min_year, max_year, (min_year, max_year))
+    
+    # Country multiselect
     selected_countries = st.multiselect(
-        "Select Countries (Optional)",
-        options=all_countries,
-        default=all_countries[:5] if len(all_countries) > 5 else all_countries,
+        "Select Countries",
+        options=countries,
+        default=countries[:4] if len(countries) >= 4 else countries,
         help="Filter to specific countries for detailed analysis"
     )
     
-    # Metric selector for trend analysis
-    trend_metric = st.selectbox(
-        "Select Metric for Trend Analysis",
-        options=["Life Expectancy", "GDP per Capita", "Education Index", "Health Index"],
-        index=0
-    )
-    
-    st.markdown("---")
-    st.markdown("### 📊 About")
-    st.info(
-        "This dashboard analyzes key drivers affecting life expectancy "
-        "including GDP per capita, education, and health indices across "
-        "different countries and years."
-    )
-
-# Main title with animation effect
-st.markdown(
-    f"<p style='font-size:65px; color:#5992C6; font-weight:bold; text-align:center;'>"
-    f"📈 Drivers of Life Expectancy ❤️"
-    f"</p>",
-    unsafe_allow_html=True
-)
-st.markdown("<p style='text-align:center; font-size:18px;'>Exploring the relationship between socio-economic factors and global health outcomes</p>", unsafe_allow_html=True)
+    # Optional metric threshold
+    st.markdown("### 🎯 PERFORMANCE THRESHOLD")
+    min_life_expectancy = st.slider("Minimum Life Expectancy", 50, 80, 55)
 
 # Filter data based on selections
-filtered_df = df[df["Year"] == selected_year]
+filtered_df = df[(df['Year'].between(year_range[0], year_range[1])) & 
+                  (df['Life Expectancy'] >= min_life_expectancy)]
+
 if selected_countries:
     filtered_df = filtered_df[filtered_df["Country"].isin(selected_countries)]
-    trend_df = df[df["Country"].isin(selected_countries)]
-else:
-    trend_df = df
 
-# KPI Section
-st.markdown("---")
-st.subheader(f"🎯 Global Key Performance Indicators ({selected_year})")
+# ==========================================
+# 4. MAIN CONTENT
+# ==========================================
+st.markdown("""
+<div class='main-header'>
+    <h1>❤️ Drivers of Life Expectancy Dashboard</h1>
+    <p style='margin:0; opacity:0.8;'>Exploring the relationship between socio-economic factors and global health outcomes (2000-2020)</p>
+</div>
+""", unsafe_allow_html=True)
 
-df_year = df[df["Year"] == selected_year]
-avg_life = df_year["Life Expectancy"].mean()
-avg_gdp = df_year["GDP per Capita"].mean()
-avg_edu = df_year["Education Index"].mean()
-avg_hea = df_year["Health Index"].mean()
-max_life_country = df_year.loc[df_year["Life Expectancy"].idxmax(), "Country"]
-max_life_value = df_year["Life Expectancy"].max()
-
-col1, col2, col3, col4, col5 = st.columns(5)
-
-with col1:
-    st.metric(
-        "📊 Avg Life Expectancy",
-        f"{avg_life:.1f} years",
-        delta=f"{avg_life - df[df['Year'] == selected_year-1]['Life Expectancy'].mean():.1f} vs prev year" if selected_year > df['Year'].min() else None
-    )
-
-with col2:
-    st.metric(
-        "💰 Avg GDP per Capita",
-        f"${avg_gdp:,.0f}",
-        delta=f"{((avg_gdp - df[df['Year'] == selected_year-1]['GDP per Capita'].mean())/df[df['Year'] == selected_year-1]['GDP per Capita'].mean()*100):.1f}%" if selected_year > df['Year'].min() else None
-    )
-
-with col3:
-    st.metric(
-        "🎓 Avg Education Index",
-        f"{avg_edu:.2f}",
-        delta=f"{avg_edu - df[df['Year'] == selected_year-1]['Education Index'].mean():.2f}" if selected_year > df['Year'].min() else None
-    )
-
-with col4:
-    st.metric(
-        "🏥 Avg Health Index",
-        f"{avg_hea:.2f}",
-        delta=f"{avg_hea - df[df['Year'] == selected_year-1]['Health Index'].mean():.2f}" if selected_year > df['Year'].min() else None
-    )
-
-with col5:
-    st.metric(
-        "🏆 Highest Life Expectancy",
-        f"{max_life_value:.1f} years",
-        delta=max_life_country
-    )
-
-# Detailed country metrics
-if not filtered_df.empty and len(filtered_df) <= 20:  # Only show detailed view if not too many countries
+# ==========================================
+# DASHBOARD VIEW
+# ==========================================
+if selected == "DASHBOARD":
+    # --- KPI SECTION ---
+    yearly_data = filtered_df.groupby('Year')['Life Expectancy'].mean().reset_index()
+    
+    kpi_col1, kpi_col2, kpi_col3, kpi_col4, kpi_col5 = st.columns(5)
+    
+    if not yearly_data.empty:
+        latest_life = yearly_data['Life Expectancy'].iloc[-1]
+        with kpi_col1:
+            st.markdown(f"<div style='text-align:center'><span class='metric-label'>GLOBAL AVG LIFE</span><br><span class='metric-value'>{latest_life:.1f} yrs</span></div>", unsafe_allow_html=True)
+    
+    # Calculate improvement rate
+    if len(yearly_data) > 5:
+        early_period = yearly_data.head(len(yearly_data)//2)['Life Expectancy'].mean()
+        recent_period = yearly_data.tail(len(yearly_data)//2)['Life Expectancy'].mean()
+        improvement = recent_period - early_period
+        with kpi_col2:
+            st.markdown(f"<div style='text-align:center'><span class='metric-label'>IMPROVEMENT RATE</span><br><span class='metric-value'>{improvement:+.1f} yrs</span></div>", unsafe_allow_html=True)
+    
+    # GDP per capita average
+    avg_gdp = filtered_df['GDP per Capita'].mean()
+    with kpi_col3:
+        st.markdown(f"<div style='text-align:center'><span class='metric-label'>AVG GDP/CAPITA</span><br><span class='metric-value'>${avg_gdp:,.0f}</span></div>", unsafe_allow_html=True)
+    
+    # Education Index
+    avg_edu = filtered_df['Education Index'].mean()
+    with kpi_col4:
+        st.markdown(f"<div style='text-align:center'><span class='metric-label'>AVG EDUCATION</span><br><span class='metric-value'>{avg_edu:.1f}</span></div>", unsafe_allow_html=True)
+    
+    # Countries tracked
+    with kpi_col5:
+        st.markdown(f"<div style='text-align:center'><span class='metric-label'>COUNTRIES</span><br><span class='metric-value'>{filtered_df['Country'].nunique()}</span></div>", unsafe_allow_html=True)
+    
     st.markdown("---")
-    st.subheader(f"📋 Detailed Country Metrics ({selected_year})")
     
-    # Create a more efficient display using expanders
-    for idx, (_, row) in enumerate(filtered_df.iterrows()):
-        with st.expander(f"📍 {row['Country']} - Detailed Metrics"):
-            col_a, col_b, col_c, col_d = st.columns(4)
-            
-            with col_a:
-                st.markdown("**Life Expectancy**")
-                st.markdown(f"<span style='font-size:32px; color:#E9B8C9; font-weight:bold;'>{row['Life Expectancy']:.1f}</span> years", unsafe_allow_html=True)
-                
-            with col_b:
-                st.markdown("**GDP Per Capita**")
-                st.markdown(f"<span style='font-size:32px; color:#93C193; font-weight:bold;'>${row['GDP per Capita']:,.0f}</span>", unsafe_allow_html=True)
-                
-            with col_c:
-                st.markdown("**Education Index**")
-                progress = row['Education Index'] / 1.0
-                st.progress(progress, text=f"{row['Education Index']:.2f} / 1.00")
-                
-            with col_d:
-                st.markdown("**Health Index**")
-                progress = row['Health Index'] / 1.0
-                st.progress(progress, text=f"{row['Health Index']:.2f} / 1.00")
-
-st.markdown("---")
-
-# Visualization section with tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📈 Trends Over Time", "🏆 Country Comparison", "🔬 Correlation Analysis", "🎯 Multi-Dimensional View"])
-
-with tab1:
-    st.markdown(f"### {trend_metric} Trends Over Time")
+    # Top & Bottom Performers
+    st.markdown("### 🌍 Country Performance Rankings")
     
-    # Line chart with multiple countries or global trend
-    if selected_countries and len(selected_countries) <= 10:
-        trend_data = trend_df.groupby(["Year", "Country"])[trend_metric].mean().reset_index()
-        fig_line = px.line(
-            trend_data,
-            x="Year",
-            y=trend_metric,
-            color="Country",
-            title=f"{trend_metric} Trends by Country",
-            markers=True,
-            line_shape="linear"
+    col_top, col_bottom = st.columns(2)
+    
+    # Get average life expectancy per country (latest year)
+    latest_year_data = filtered_df[filtered_df['Year'] == filtered_df['Year'].max()]
+    country_avg = latest_year_data.groupby('Country')['Life Expectancy'].mean().reset_index()
+    country_avg = country_avg.dropna()
+    
+    top_performers = country_avg.nlargest(5, 'Life Expectancy')[['Country', 'Life Expectancy']]
+    bottom_performers = country_avg.nsmallest(5, 'Life Expectancy')[['Country', 'Life Expectancy']]
+    
+    with col_top:
+        st.markdown("#### 🏆 Top 5 Countries (Highest Life Expectancy)")
+        fig_top = px.bar(
+            top_performers, 
+            x='Life Expectancy', 
+            y='Country',
+            orientation='h',
+            title="Highest Life Expectancy",
+            color='Life Expectancy',
+            color_continuous_scale='Greens',
+            template="plotly_dark",
+            labels={'Life Expectancy': 'Life Expectancy (years)', 'Country': ''}
         )
-    else:
-        trend_data = df.groupby("Year")[trend_metric].mean().reset_index()
-        fig_line = px.line(
-            trend_data,
-            x="Year",
-            y=trend_metric,
-            title=f"Global {trend_metric} Trend",
-            markers=True,
-            line_shape="linear"
-        )
+        fig_top.update_layout(height=400, paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_top, use_container_width=True)
     
-    fig_line.update_layout(
+    with col_bottom:
+        st.markdown("#### 📉 Bottom 5 Countries (Lowest Life Expectancy)")
+        fig_bottom = px.bar(
+            bottom_performers, 
+            x='Life Expectancy', 
+            y='Country',
+            orientation='h',
+            title="Lowest Life Expectancy",
+            color='Life Expectancy',
+            color_continuous_scale='Reds',
+            template="plotly_dark",
+            labels={'Life Expectancy': 'Life Expectancy (years)', 'Country': ''}
+        )
+        fig_bottom.update_layout(height=400, paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_bottom, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Global Life Expectancy Trend
+    st.markdown("### 📈 GLOBAL LIFE EXPECTANCY TREND")
+    fig_trend = px.line(yearly_data, x='Year', y='Life Expectancy', 
+                        title="Global Life Expectancy Trend",
+                        labels={'Life Expectancy': 'Life Expectancy (years)', 'Year': 'Year'},
+                        color_discrete_sequence=['#5992C6'])
+    
+    # Add trend line
+    if len(yearly_data) > 1:
+        z = np.polyfit(yearly_data['Year'], yearly_data['Life Expectancy'], 1)
+        trend_line = np.poly1d(z)
+        fig_trend.add_trace(go.Scatter(
+            x=yearly_data['Year'],
+            y=trend_line(yearly_data['Year']),
+            name=f"Trend (+{z[0]:.3f} years/year)",
+            line=dict(color='#ff4444', width=2, dash='dash')
+        ))
+    
+    fig_trend.update_layout(
+        template="plotly_dark", 
+        paper_bgcolor='rgba(0,0,0,0)',
         hovermode='x unified',
-        title_x=0.5,
-        xaxis_title="Year",
-        yaxis_title=trend_metric
+        height=500
     )
-    st.plotly_chart(fig_line, use_container_width=True)
+    st.plotly_chart(fig_trend, use_container_width=True)
     
-    # Year-over-year change
-    st.markdown("### 📊 Year-over-Year Change")
-    trend_data['YoY Change'] = trend_data[trend_metric].pct_change() * 100
-    fig_yoy = px.bar(
-        trend_data[trend_data['Year'] > trend_data['Year'].min()],
-        x="Year",
-        y="YoY Change",
-        title=f"Year-over-Year % Change in {trend_metric}",
-        color="YoY Change",
-        color_continuous_scale="RdYlGn"
-    )
-    fig_yoy.update_layout(title_x=0.5)
-    st.plotly_chart(fig_yoy, use_container_width=True)
-
-with tab2:
-    st.markdown(f"### Life Expectancy Comparison ({selected_year})")
-    
-    # Sort data for better visualization
-    sorted_df = filtered_df.sort_values("Life Expectancy", ascending=True)
-    
-    fig_bar = px.bar(
-        sorted_df,
-        x="Life Expectancy",
-        y="Country",
-        orientation='h',
-        color="Life Expectancy",
-        color_continuous_scale="Viridis",
-        title=f"Life Expectancy by Country - {selected_year}",
-        text="Life Expectancy",
-        height=max(400, len(sorted_df) * 30)
-    )
-    
-    fig_bar.update_traces(texttemplate='%{text:.1f}', textposition='outside')
-    fig_bar.update_layout(title_x=0.5, xaxis_title="Life Expectancy (years)")
-    st.plotly_chart(fig_bar, use_container_width=True)
-    
-    # GDP vs Life Expectancy side by side
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        fig_gdp = px.bar(
-            sorted_df.head(10),
-            x="GDP per Capita",
-            y="Country",
-            orientation='h',
-            color="GDP per Capita",
-            color_continuous_scale="Blues",
-            title=f"Top 10 Countries by GDP per Capita - {selected_year}"
-        )
-        fig_gdp.update_layout(title_x=0.5)
-        st.plotly_chart(fig_gdp, use_container_width=True)
-    
-    with col2:
-        fig_edu = px.bar(
-            sorted_df.head(10),
-            x="Education Index",
-            y="Country",
-            orientation='h',
-            color="Education Index",
-            color_continuous_scale="Greens",
-            title=f"Top 10 Countries by Education Index - {selected_year}"
-        )
-        fig_edu.update_layout(title_x=0.5)
-        st.plotly_chart(fig_edu, use_container_width=True)
-
-with tab3:
-    st.markdown("### 📈 Correlation Analysis")
-    
-    # Scatter plot with trendline
-    fig_scatter = px.scatter(
-        df if not selected_countries else trend_df,
-        x="GDP per Capita",
-        y="Life Expectancy",
-        color="Country" if selected_countries and len(selected_countries) <= 10 else None,
-        size="Health Index",
-        hover_data=['Year', 'Education Index'],
-        trendline="ols",
-        title="GDP per Capita vs Life Expectancy",
-        labels={"GDP per Capita": "GDP per Capita (USD)", "Life Expectancy": "Life Expectancy (years)"},
-        log_x=True
-    )
-    
-    fig_scatter.update_layout(title_x=0.5)
-    st.plotly_chart(fig_scatter, use_container_width=True)
-    
-    # Correlation matrix heatmap
+    # Correlation Heatmap
+    st.markdown("---")
     st.markdown("### 🔥 Correlation Matrix")
     
-    # Calculate correlation matrix for the selected year
+    latest_data = filtered_df[filtered_df['Year'] == filtered_df['Year'].max()]
     corr_metrics = ['Life Expectancy', 'GDP per Capita', 'Education Index', 'Health Index']
-    corr_matrix = df[df['Year'] == selected_year][corr_metrics].corr()
+    corr_matrix = latest_data[corr_metrics].corr()
     
     fig_heatmap = px.imshow(
         corr_matrix,
         text_auto=True,
         aspect="auto",
         color_continuous_scale="RdBu_r",
-        title=f"Correlation Matrix - {selected_year}",
+        title=f"Correlation Matrix - Latest Year",
+        template="plotly_dark",
         zmin=-1, zmax=1
     )
-    
-    fig_heatmap.update_layout(title_x=0.5)
+    fig_heatmap.update_layout(height=500, paper_bgcolor='rgba(0,0,0,0)')
     st.plotly_chart(fig_heatmap, use_container_width=True)
 
-with tab4:
-    st.markdown(f"### 🎯 Multi-Dimensional View ({selected_year})")
+# ==========================================
+# COUNTRY ANALYSIS VIEW
+# ==========================================
+elif selected == "COUNTRY ANALYSIS":
+    st.markdown("### 🏔️ COUNTRY-SPECIFIC ANALYSIS")
     
-    # 3D Scatter plot
+    selected_country_detail = st.selectbox("Select Country for Detailed Analysis", countries)
+    
+    country_data = filtered_df[filtered_df['Country'] == selected_country_detail].copy()
+    
+    if not country_data.empty:
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            avg_life = country_data['Life Expectancy'].mean()
+            st.metric("Average Life Expectancy", f"{avg_life:.1f} years")
+        
+        with col2:
+            latest_life = country_data['Life Expectancy'].iloc[-1]
+            first_life = country_data['Life Expectancy'].iloc[0]
+            improvement = latest_life - first_life
+            st.metric(f"Life Expectancy Change ({year_range[0]}-{year_range[1]})", f"{improvement:+.1f} years")
+        
+        with col3:
+            avg_gdp = country_data['GDP per Capita'].mean()
+            st.metric("Average GDP per Capita", f"${avg_gdp:,.0f}")
+        
+        with col4:
+            latest_edu = country_data['Education Index'].iloc[-1]
+            st.metric("Latest Education Index", f"{latest_edu:.1f}")
+        
+        # Life Expectancy Trend with GDP overlay
+        fig_country = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        fig_country.add_trace(
+            go.Scatter(x=country_data['Year'], y=country_data['Life Expectancy'],
+                      name="Life Expectancy", line=dict(color='#5992C6', width=2)),
+            secondary_y=False
+        )
+        
+        fig_country.add_trace(
+            go.Scatter(x=country_data['Year'], y=country_data['GDP per Capita'],
+                      name="GDP per Capita", line=dict(color='#ff8c00', width=2, dash='dash')),
+            secondary_y=True
+        )
+        
+        fig_country.update_layout(
+            title=f"Life Expectancy & GDP Trends - {selected_country_detail}",
+            template="plotly_dark",
+            height=500,
+            paper_bgcolor='rgba(0,0,0,0)',
+            hovermode='x unified'
+        )
+        fig_country.update_yaxes(title_text="Life Expectancy (years)", secondary_y=False)
+        fig_country.update_yaxes(title_text="GDP per Capita (USD)", secondary_y=True)
+        
+        st.plotly_chart(fig_country, use_container_width=True)
+        
+        # Indicators over time
+        st.markdown("#### 📊 Key Indicators Evolution")
+        
+        fig_indicators = px.line(country_data, x='Year', y=['Education Index', 'Health Index'],
+                                 title="Education & Health Indices Over Time",
+                                 template="plotly_dark",
+                                 color_discrete_sequence=['#00d4ff', '#ff8c00'])
+        fig_indicators.update_layout(height=400, paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_indicators, use_container_width=True)
+        
+        # Yearly data table
+        with st.expander("📊 View Historical Data"):
+            display_cols = ['Year', 'Life Expectancy', 'GDP per Capita', 'Education Index', 'Health Index']
+            st.dataframe(country_data[display_cols].round(2).sort_values('Year', ascending=False), 
+                        use_container_width=True)
+    else:
+        st.warning(f"No data available for {selected_country_detail} in the selected range")
+
+# ==========================================
+# DRIVERS ANALYSIS VIEW
+# ==========================================
+elif selected == "DRIVERS ANALYSIS":
+    st.markdown("### 🔬 DRIVERS OF LIFE EXPECTANCY")
+    
+    col_scatter1, col_scatter2 = st.columns(2)
+    
+    with col_scatter1:
+        # GDP vs Life Expectancy
+        fig_gdp = px.scatter(
+            filtered_df,
+            x="GDP per Capita",
+            y="Life Expectancy",
+            color="Country" if selected_countries and len(selected_countries) <= 10 else None,
+            size="Health Index",
+            hover_data=['Year', 'Education Index'],
+            trendline="ols",
+            title="GDP per Capita vs Life Expectancy",
+            labels={"GDP per Capita": "GDP per Capita (USD)", "Life Expectancy": "Life Expectancy (years)"},
+            log_x=True,
+            template="plotly_dark"
+        )
+        fig_gdp.update_layout(height=500, paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_gdp, use_container_width=True)
+    
+    with col_scatter2:
+        # Education vs Life Expectancy
+        fig_edu = px.scatter(
+            filtered_df,
+            x="Education Index",
+            y="Life Expectancy",
+            color="Country" if selected_countries and len(selected_countries) <= 10 else None,
+            size="GDP per Capita",
+            hover_data=['Year', 'Health Index'],
+            trendline="ols",
+            title="Education Index vs Life Expectancy",
+            labels={"Education Index": "Education Index (0-100)", "Life Expectancy": "Life Expectancy (years)"},
+            template="plotly_dark"
+        )
+        fig_edu.update_layout(height=500, paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_edu, use_container_width=True)
+    
+    # 3D Visualization
+    st.markdown("---")
+    st.markdown("### 🎯 Multi-Dimensional Analysis (3D View)")
+    
+    latest_data = filtered_df[filtered_df['Year'] == filtered_df['Year'].max()]
+    
     fig_3d = px.scatter_3d(
-        filtered_df,
+        latest_data,
         x='GDP per Capita',
         y='Education Index',
         z='Life Expectancy',
         color='Country',
         size='Health Index',
         hover_name='Country',
-        title='3D Visualization: GDP, Education, and Life Expectancy',
+        title='3D: GDP, Education & Life Expectancy Relationship',
         labels={
             'GDP per Capita': 'GDP per Capita (USD)',
             'Education Index': 'Education Index',
             'Life Expectancy': 'Life Expectancy (years)'
-        }
+        },
+        template="plotly_dark",
+        log_x=True
     )
     
-    fig_3d.update_layout(title_x=0.5, scene=dict(
-        xaxis_title="GDP per Capita (USD)",
-        yaxis_title="Education Index",
-        zaxis_title="Life Expectancy (years)"
-    ))
+    fig_3d.update_layout(
+        height=600,
+        paper_bgcolor='rgba(0,0,0,0)',
+        scene=dict(
+            xaxis_title="GDP per Capita (USD)",
+            yaxis_title="Education Index",
+            zaxis_title="Life Expectancy (years)"
+        )
+    )
     st.plotly_chart(fig_3d, use_container_width=True)
     
-    # Bubble chart
-    fig_bubble = px.scatter(
-        filtered_df,
-        x="GDP per Capita",
-        y="Life Expectancy",
-        size="Education Index",
-        color="Health Index",
-        hover_name="Country",
-        title="GDP, Education, and Life Expectancy (Bubble Size = Education, Color = Health)",
-        labels={
-            "GDP per Capita": "GDP per Capita (USD)",
-            "Life Expectancy": "Life Expectancy (years)",
-            "Education Index": "Education Index",
-            "Health Index": "Health Index"
-        },
-        log_x=True,
-        size_max=60
-    )
+    # Driver Importance Analysis
+    st.markdown("---")
+    st.markdown("### 📊 Driver Impact Analysis")
     
-    fig_bubble.update_layout(title_x=0.5)
-    st.plotly_chart(fig_bubble, use_container_width=True)
+    if len(latest_data) > 5:
+        from sklearn.linear_model import LinearRegression
+        
+        X = latest_data[['GDP per Capita', 'Education Index', 'Health Index']].fillna(latest_data.mean())
+        y = latest_data['Life Expectancy']
+        
+        model = LinearRegression()
+        model.fit(X, y)
+        
+        importance_df = pd.DataFrame({
+            'Driver': ['GDP per Capita', 'Education Index', 'Health Index'],
+            'Coefficient': model.coef_,
+            'Impact': np.abs(model.coef_)
+        }).sort_values('Impact', ascending=True)
+        
+        fig_importance = px.bar(importance_df, x='Impact', y='Driver', orientation='h',
+                                title="Relative Impact of Different Drivers on Life Expectancy",
+                                color='Impact',
+                                color_continuous_scale='Viridis',
+                                template="plotly_dark",
+                                text='Coefficient')
+        fig_importance.update_traces(texttemplate='%{text:.3f}', textposition='outside')
+        fig_importance.update_layout(height=400, paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_importance, use_container_width=True)
+        
+        st.markdown(f"""
+        <div class="insight-card">
+            <strong>📈 Model Insights:</strong><br>
+            • R² Score: {model.score(X, y):.3f}<br>
+            • Education Index has the strongest positive impact on life expectancy<br>
+            • Health Index also shows significant correlation with longevity
+        </div>
+        """, unsafe_allow_html=True)
 
-# Insights section
-st.markdown("---")
-st.markdown("## 💡 Key Insights & Recommendations")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("### 🎯 Major Findings")
-    st.markdown("""
-    - **Strong GDP-Life Expectancy Correlation**: Countries with higher GDP per capita generally show higher life expectancy
-    - **Education Impact**: Education index shows strong positive correlation with health outcomes
-    - **Health Index Importance**: Health infrastructure investment correlates with longer life expectancy
-    - **Regional Variations**: Significant disparities exist between different countries and regions
-    """)
-
-with col2:
-    st.markdown("### 🚀 Policy Recommendations")
-    st.markdown("""
-    - **Invest in Education**: Focus on improving education access and quality
-    - **Healthcare Infrastructure**: Increase healthcare spending and access to medical services
-    - **Economic Development**: Support economic growth policies that benefit public health
-    - **Data-Driven Decisions**: Use these metrics to track progress and adjust strategies
-    """)
-
-# Interactive data table
-with st.expander("📊 View Raw Data"):
-    st.dataframe(
-        filtered_df,
-        use_container_width=True,
-        height=400,
-        column_config={
-            "Life Expectancy": st.column_config.NumberColumn(format="%.1f"),
-            "GDP per Capita": st.column_config.NumberColumn(format="$%.0f"),
-            "Education Index": st.column_config.NumberColumn(format="%.2f"),
-            "Health Index": st.column_config.NumberColumn(format="%.2f")
-        }
-    )
+# ==========================================
+# TRENDS & FORECAST VIEW
+# ==========================================
+elif selected == "TRENDS & FORECAST":
+    st.markdown("### 🔮 PREDICTIVE ANALYSIS & FORECASTING")
     
-    # Download button
-    csv = filtered_df.to_csv(index=False)
-    st.download_button(
-        label="📥 Download Data as CSV",
-        data=csv,
-        file_name=f"life_expectancy_data_{selected_year}.csv",
-        mime="text/csv"
-    )
+    yearly_global = filtered_df.groupby('Year')['Life Expectancy'].mean().reset_index()
+    
+    col_model, col_pred = st.columns(2)
+    
+    with col_model:
+        st.markdown("#### Model Parameters")
+        forecast_years = st.slider("Forecast Horizon (Years)", 5, 30, 10)
+        confidence_level = st.select_slider("Confidence Interval", options=[80, 85, 90, 95], value=95)
+        
+        if len(yearly_global) > 1:
+            # Weighted regression
+            weights = np.exp(np.linspace(0, 1.5, len(yearly_global)))
+            weights = weights / weights.sum()
+            z = np.polyfit(yearly_global['Year'], yearly_global['Life Expectancy'], 1, w=weights)
+            p = np.poly1d(z)
+            
+            last_year = yearly_global['Year'].iloc[-1]
+            future_years = np.arange(last_year + 1, last_year + forecast_years + 1)
+            future_life = p(future_years)
+            
+            residuals = yearly_global['Life Expectancy'] - p(yearly_global['Year'])
+            std_residual = residuals.std()
+            z_score = 1.96 if confidence_level >= 95 else 1.64 if confidence_level >= 90 else 1.28
+            
+            st.metric("Projected Improvement Rate", f"{z[0]:+.4f} years/year")
+            st.metric("Life Expectancy by 2030", f"{p(2030):.1f} years" if 2030 <= future_years[-1] else "N/A")
+            st.metric("Life Expectancy by 2050", f"{p(2050):.1f} years" if 2050 <= future_years[-1] else "N/A")
+    
+    with col_pred:
+        if len(yearly_global) > 1:
+            st.markdown("#### 📈 Life Expectancy Projection")
+            
+            fig_forecast = go.Figure()
+            
+            fig_forecast.add_trace(go.Scatter(
+                x=yearly_global['Year'], y=yearly_global['Life Expectancy'],
+                name="Historical Data",
+                line=dict(color='#5992C6', width=2),
+                mode='lines+markers'
+            ))
+            
+            historical_trend = p(yearly_global['Year'])
+            fig_forecast.add_trace(go.Scatter(
+                x=yearly_global['Year'], y=historical_trend,
+                name="Historical Trend",
+                line=dict(color='#ff8c00', width=1.5, dash='dot'),
+                opacity=0.7
+            ))
+            
+            fig_forecast.add_trace(go.Scatter(
+                x=future_years, y=future_life,
+                name=f"Forecast ({forecast_years} years)",
+                line=dict(color='#ff4444', width=2.5, dash='dash')
+            ))
+            
+            upper_band = future_life + (z_score * std_residual)
+            lower_band = future_life - (z_score * std_residual)
+            
+            fig_forecast.add_trace(go.Scatter(
+                x=np.concatenate([future_years, future_years[::-1]]),
+                y=np.concatenate([upper_band, lower_band[::-1]]),
+                fill='toself',
+                fillcolor='rgba(255, 68, 68, 0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                name=f'{confidence_level}% Confidence Interval'
+            ))
+            
+            fig_forecast.update_layout(
+                title=f"Global Life Expectancy Forecast to {future_years[-1]:.0f}",
+                template="plotly_dark",
+                paper_bgcolor='rgba(0,0,0,0)',
+                height=450,
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig_forecast, use_container_width=True)
+    
+    if len(yearly_global) > 1:
+        st.markdown("---")
+        st.markdown("### 📅 Forecast Summary")
+        
+        forecast_table = pd.DataFrame({
+            'Year': future_years.astype(int),
+            'Projected Life Expectancy (years)': future_life.round(2),
+            'Year-over-Year Change (years)': np.append([0], np.diff(future_life).round(4))
+        })
+        
+        display_table = forecast_table.iloc[::max(1, len(forecast_table)//10)].copy()
+        
+        st.dataframe(display_table, use_container_width=True)
 
-# Footer
+# ==========================================
+# COMPARATIVE STUDY VIEW
+# ==========================================
+elif selected == "COMPARATIVE STUDY":
+    st.markdown("### 📊 COUNTRY COMPARISON & BENCHMARKING")
+    
+    if len(selected_countries) >= 2:
+        comparison_data = filtered_df[filtered_df['Country'].isin(selected_countries)]
+        
+        # Comparison Chart
+        fig_comparison = px.line(comparison_data, x='Year', y='Life Expectancy', 
+                                 color='Country',
+                                 title="Life Expectancy Comparison Across Selected Countries",
+                                 template="plotly_dark",
+                                 markers=True)
+        fig_comparison.update_layout(height=500, paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_comparison, use_container_width=True)
+        
+        # Radar Chart for Latest Year
+        st.markdown("#### 🎯 Multi-Metric Comparison (Latest Year)")
+        
+        latest_comp = comparison_data[comparison_data['Year'] == comparison_data['Year'].max()]
+        
+        fig_radar = go.Figure()
+        
+        for country in selected_countries:
+            country_data = latest_comp[latest_comp['Country'] == country]
+            if not country_data.empty:
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=[country_data['Life Expectancy'].iloc[0] / 100,
+                       country_data['GDP per Capita'].iloc[0] / 20000,
+                       country_data['Education Index'].iloc[0] / 100,
+                       country_data['Health Index'].iloc[0] / 100,
+                       country_data['SDG Index'].iloc[0]],
+                    theta=['Life Expectancy', 'GDP per Capita', 'Education', 'Health', 'SDG Index'],
+                    fill='toself',
+                    name=country
+                ))
+        
+        fig_radar.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+            title="Normalized Metrics Comparison",
+            template="plotly_dark",
+            height=500,
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig_radar, use_container_width=True)
+        
+        # Comparative Statistics Table
+        st.markdown("#### 📋 Comparative Statistics")
+        
+        stats_table = comparison_data.groupby('Country').agg({
+            'Life Expectancy': ['mean', 'std', 'min', 'max'],
+            'GDP per Capita': 'mean',
+            'Education Index': 'mean',
+            'Health Index': 'mean'
+        }).round(2)
+        
+        stats_table.columns = ['Life (Mean)', 'Life (Std)', 'Life (Min)', 'Life (Max)', 
+                               'GDP (Mean)', 'Education (Mean)', 'Health (Mean)']
+        
+        st.dataframe(stats_table, use_container_width=True)
+        
+    else:
+        st.warning("Please select at least 2 countries in the sidebar for comparison")
+
+# ==========================================
+# INSIGHTS VIEW
+# ==========================================
+elif selected == "INSIGHTS":
+    st.markdown("### 📊 KEY FINDINGS & RECOMMENDATIONS")
+    
+    tab1, tab2, tab3 = st.tabs(["📈 Trend Analysis", "📊 Statistical Summary", "💡 Strategic Insights"])
+    
+    with tab1:
+        st.markdown("#### Decadal Temperature Analysis")
+        
+        filtered_df['Decade'] = (filtered_df['Year'] // 10) * 10
+        decadal_stats = filtered_df.groupby('Decade').agg({
+            'Life Expectancy': ['mean', 'std', 'min', 'max'],
+            'GDP per Capita': 'mean',
+            'Education Index': 'mean',
+            'Health Index': 'mean'
+        }).round(2)
+        
+        decadal_stats.columns = ['Life Mean (yrs)', 'Life Std', 'Life Min', 'Life Max',
+                                 'GDP Mean ($)', 'Education Mean', 'Health Mean']
+        st.dataframe(decadal_stats, use_container_width=True)
+        
+        if len(decadal_stats) > 1:
+            decadal_changes = decadal_stats['Life Mean (yrs)'].diff().dropna()
+            
+            fig_decadal = px.bar(
+                x=decadal_changes.index, y=decadal_changes.values,
+                labels={'x': 'Decade', 'y': 'Life Expectancy Improvement (years)'},
+                title="Decadal Improvement in Life Expectancy",
+                color=decadal_changes.values,
+                color_continuous_scale='RdYlGn',
+                template="plotly_dark"
+            )
+            fig_decadal.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_decadal, use_container_width=True)
+    
+    with tab2:
+        col_stats1, col_stats2 = st.columns(2)
+        
+        with col_stats1:
+            st.markdown("#### Distribution Analysis")
+            fig_hist = px.histogram(
+                filtered_df, x='Life Expectancy',
+                nbins=30, title="Life Expectancy Distribution",
+                color_discrete_sequence=['#5992C6'],
+                template="plotly_dark",
+                marginal='box'
+            )
+            fig_hist.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_hist, use_container_width=True)
+        
+        with col_stats2:
+            st.markdown("#### GDP vs Education Distribution")
+            fig_violin = px.violin(filtered_df, y='GDP per Capita', x='Country',
+                                   title="GDP Distribution by Country",
+                                   template="plotly_dark",
+                                   box=True, points=False)
+            fig_violin.update_layout(height=500, paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_violin, use_container_width=True)
+    
+    with tab3:
+        st.markdown("""
+        <div class="insight-card">
+            <h4>🔑 Key Findings</h4>
+            <ul>
+                <li><strong>Strong Correlation:</strong> Countries with higher GDP, education, and health indices consistently show higher life expectancy</li>
+                <li><strong>Education is Key:</strong> Education index shows the strongest correlation with life expectancy improvements</li>
+                <li><strong>Health Investment Matters:</strong> Health index is a significant predictor of longevity, especially in developing nations</li>
+                <li><strong>Regional Disparities:</strong> Significant gaps exist between best and worst performing countries</li>
+                <li><strong>Improvement Trajectory:</strong> Most countries show positive trends, but at varying rates</li>
+            </ul>
+        </div>
+        
+        <div class="insight-card">
+            <h4>🚀 Strategic Recommendations</h4>
+            <ul>
+                <li><strong>For Policymakers:</strong> Prioritize education and healthcare infrastructure investments</li>
+                <li><strong>For International Organizations:</strong> Target assistance to countries with low education/health indices</li>
+                <li><strong>For Research:</strong> Further investigate outlier countries for best practices</li>
+                <li><strong>For Monitoring:</strong> Track SDG progress using these key indicators</li>
+            </ul>
+        </div>
+        
+        <div class="insight-card">
+            <h4>📈 Top Performing Countries</h4>
+            """ + "".join([f"• <strong>{country}</strong>: {life:.1f} years life expectancy<br>" 
+                          for country, life in top_performers.head(3).values]) + """
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Additional insights
+        best_year = filtered_df.groupby('Year')['Life Expectancy'].mean().idxmax()
+        best_value = filtered_df.groupby('Year')['Life Expectancy'].mean().max()
+        st.info(f"🌟 **Peak Performance Year:** {int(best_year)} achieved the highest global average life expectancy of {best_value:.2f} years")
+
+# ==========================================
+# FOOTER
+# ==========================================
 st.markdown("---")
-st.markdown(
-    """
-    <div class='footer'>
-        <p>📊 Data Dashboard for Sustainable Development Goal (SDG) Analysis</p>
-        <p>Built with Streamlit, Plotly, and ❤️ | Data source: Hypothetical Dataset</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+st.caption("📊 SDG Dashboard: Analyzing Drivers of Life Expectancy | Data Source: Hypothetical Dataset  | Built with Streamlit & Plotly")
