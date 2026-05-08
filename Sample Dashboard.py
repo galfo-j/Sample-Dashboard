@@ -5,8 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import base64
-import subprocess
-import sys
+from sklearn.linear_model import LinearRegression  # Add this import
 
 # ==========================================
 # 1. CONFIGURATION & THEMING
@@ -93,6 +92,24 @@ def apply_pro_theme(bg_file):
         border-left: 4px solid #5992C6;
         margin: 15px 0;
     }}
+    
+    /* Custom navigation styling */
+    .nav-button {{
+        background: transparent;
+        border: none;
+        color: #c0d0e0;
+        padding: 10px 15px;
+        text-align: left;
+        width: 100%;
+        border-radius: 8px;
+        margin: 2px 0;
+        transition: all 0.3s ease;
+    }}
+    .nav-button:hover {{
+        background: rgba(89, 146, 198, 0.2);
+        border-left: 3px solid #5992C6;
+        padding-left: 12px;
+    }}
     </style>
     '''
     st.markdown(theme_css, unsafe_allow_html=True)
@@ -140,20 +157,21 @@ countries = sorted(df["Country"].unique())
 years = sorted(df["Year"].unique())
 
 # ==========================================
-# 3. SIDEBAR NAVIGATION
+# 3. SIDEBAR NAVIGATION (Native Streamlit)
 # ==========================================
 with st.sidebar:
-    selected = option_menu(
-        menu_title=None,
-        options=["DASHBOARD", "COUNTRY ANALYSIS", "DRIVERS ANALYSIS", "TRENDS & FORECAST", "COMPARATIVE STUDY", "INSIGHTS"],
-        icons=["graph-up", "flag", "graph-up-arrow", "calendar-week", "bar-chart", "lightbulb"],
-        default_index=0,
-        styles={
-            "container": {"background-color": "transparent"},
-            "nav-link": {"color": "#c0d0e0", "font-size": "0.85rem", "text-align": "left"},
-            "nav-link-selected": {"background-color": "rgba(89,146,198,0.2)", "border-left": "3px solid #5992C6"},
-        }
+    st.markdown("### 🧭 Navigation")
+    
+    # Navigation using radio buttons (alternative to option_menu)
+    selected = st.radio(
+        "Select View",
+        options=["📊 DASHBOARD", "🏔️ COUNTRY ANALYSIS", "🔬 DRIVERS ANALYSIS", 
+                 "📈 TRENDS & FORECAST", "📊 COMPARATIVE STUDY", "💡 INSIGHTS"],
+        label_visibility="collapsed"
     )
+    
+    # Remove the emoji prefix for internal use
+    selected = selected.split(" ", 1)[-1] if " " in selected else selected
     
     st.divider()
     
@@ -482,8 +500,6 @@ elif selected == "DRIVERS ANALYSIS":
     st.markdown("### 📊 Driver Impact Analysis")
     
     if len(latest_data) > 5:
-        from sklearn.linear_model import LinearRegression
-        
         X = latest_data[['GDP per Capita', 'Education Index', 'Health Index']].fillna(latest_data.mean())
         y = latest_data['Life Expectancy']
         
@@ -641,7 +657,7 @@ elif selected == "COMPARATIVE STUDY":
             country_data = latest_comp[latest_comp['Country'] == country]
             if not country_data.empty:
                 fig_radar.add_trace(go.Scatterpolar(
-                    r=[country_data['Life Expectancy'].iloc[0] / 100,
+                    r=[country_data['Life Expectancy'].iloc[0] / 80,
                        country_data['GDP per Capita'].iloc[0] / 20000,
                        country_data['Education Index'].iloc[0] / 100,
                        country_data['Health Index'].iloc[0] / 100,
@@ -687,7 +703,7 @@ elif selected == "INSIGHTS":
     tab1, tab2, tab3 = st.tabs(["📈 Trend Analysis", "📊 Statistical Summary", "💡 Strategic Insights"])
     
     with tab1:
-        st.markdown("#### Decadal Temperature Analysis")
+        st.markdown("#### Decadal Analysis")
         
         filtered_df['Decade'] = (filtered_df['Year'] // 10) * 10
         decadal_stats = filtered_df.groupby('Decade').agg({
@@ -731,13 +747,9 @@ elif selected == "INSIGHTS":
             st.plotly_chart(fig_hist, use_container_width=True)
         
         with col_stats2:
-            st.markdown("#### GDP vs Education Distribution")
-            fig_violin = px.violin(filtered_df, y='GDP per Capita', x='Country',
-                                   title="GDP Distribution by Country",
-                                   template="plotly_dark",
-                                   box=True, points=False)
-            fig_violin.update_layout(height=500, paper_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig_violin, use_container_width=True)
+            st.markdown("#### Summary Statistics")
+            stats_df = filtered_df[['Life Expectancy', 'GDP per Capita', 'Education Index', 'Health Index']].describe().round(2)
+            st.dataframe(stats_df, use_container_width=True)
     
     with tab3:
         st.markdown("""
@@ -761,15 +773,18 @@ elif selected == "INSIGHTS":
                 <li><strong>For Monitoring:</strong> Track SDG progress using these key indicators</li>
             </ul>
         </div>
-        
-        <div class="insight-card">
-            <h4>📈 Top Performing Countries</h4>
-            """ + "".join([f"• <strong>{country}</strong>: {life:.1f} years life expectancy<br>" 
-                          for country, life in top_performers.head(3).values]) + """
-        </div>
         """, unsafe_allow_html=True)
         
         # Additional insights
+        if not top_performers.empty:
+            st.markdown(f"""
+            <div class="insight-card">
+                <h4>📈 Top Performing Countries</h4>
+                """ + "".join([f"• <strong>{country}</strong>: {life:.1f} years life expectancy<br>" 
+                              for country, life in top_performers.head(3).values]) + """
+            </div>
+            """, unsafe_allow_html=True)
+        
         best_year = filtered_df.groupby('Year')['Life Expectancy'].mean().idxmax()
         best_value = filtered_df.groupby('Year')['Life Expectancy'].mean().max()
         st.info(f"🌟 **Peak Performance Year:** {int(best_year)} achieved the highest global average life expectancy of {best_value:.2f} years")
