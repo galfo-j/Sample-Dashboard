@@ -798,4 +798,4 @@ elif selected == "INSIGHTS":
 # FOOTER
 # ==========================================
 st.markdown("---")
-st.caption("📊 SDG Dashboard: Analyzing Drivers of Life Expectancy | Data Source: Hypothetical Dataset (2000-2020) | Built with Streamlit & Plotly")
+st.caption("📊 SDG Dashboard: Analyzing Drivers of Life Expectancy | Data Source: Hypothetical Dataset  | Built with Streamlit & Plotly")
